@@ -8,7 +8,7 @@ const PORT = 3000; // Change if needed
 // Load Salesforce OAuth credentials from environment variables
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = "https://your-aws-server.com/oauth/callback"; // Change after deployment
+const REDIRECT_URI = "https://catmando.xyz/oauth/callback"; // Change after deployment
 
 // Redirect user to Salesforce login
 app.get("/auth/salesforce", (req, res) => {
