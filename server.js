@@ -48,6 +48,41 @@ app.get("/oauth/callback", async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Server Status</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                background-color: #f4f4f4;
+                margin: 0;
+                padding: 50px;
+            }
+            h1 {
+                color: #333;
+            }
+            img {
+                width: 300px;
+                margin-top: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Server is Running!</h1>
+        <p>Your Node.js server is active and responding.</p>
+        <img src="https://source.unsplash.com/600x400/?technology,server" alt="Server Image">
+    </body>
+    </html>
+  `);
+});
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
