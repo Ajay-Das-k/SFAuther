@@ -1,24 +1,53 @@
-const http = require("http");
+const express = require("express");
+const axios = require("axios");
+require("dotenv").config();
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/html" });
-  res.end(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Node.js HTML Response</title>
-        </head>
-        <body>
-            <h1>Welcome to My Node.js Server</h1>
-            <p>This is a simple HTML response from a Node.js server.</p>
-        </body>
-        </html>
-    `);
+const app = express();
+const PORT = 3000; // Change if needed
+
+// Load Salesforce OAuth credentials from environment variables
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI = "https://catmando.xyz/oauth/callback"; // Change after deployment
+
+// Redirect user to Salesforce login
+app.get("/auth/salesforce", (req, res) => {
+  const authUrl = `https://login.salesforce.com/services/oauth2/authorize?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}`;
+  res.redirect(authUrl);
 });
 
-const PORT = 3000;
-server.listen(PORT, () => {
+// Handle OAuth callback & exchange code for access token
+app.get("/oauth/callback", async (req, res) => {
+  const authCode = req.query.code;
+  if (!authCode) return res.status(400).send("Authorization code missing");
+
+  try {
+    const tokenResponse = await axios.post(
+      "https://login.salesforce.com/services/oauth2/token",
+      null,
+      {
+        params: {
+          grant_type: "authorization_code",
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          redirect_uri: REDIRECT_URI,
+          code: authCode,
+        },
+      }
+    );
+
+    const { access_token, instance_url } = tokenResponse.data;
+
+    res.json({ access_token, instance_url });
+  } catch (error) {
+    console.error(
+      "OAuth Token Exchange Error:",
+      error.response?.data || error.message
+    );
+    res.status(500).send("Failed to exchange token.");
+  }
+});
+
+app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
