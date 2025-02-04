@@ -9,9 +9,9 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(require("cors")());
-app.use(morgan("dev")); // Morgan logs every request
+app.use(morgan("dev")); // Logs all HTTP requests
 
-// Master Authentication Org Credentials (Stored in AWS Secrets)
+// Master Org Credentials (Stored in AWS)
 const MASTER_CLIENT_ID = process.env.MASTER_CLIENT_ID;
 const MASTER_CLIENT_SECRET = process.env.MASTER_CLIENT_SECRET;
 const MASTER_USERNAME = process.env.MASTER_USERNAME;
@@ -19,7 +19,7 @@ const MASTER_PASSWORD =
   process.env.MASTER_PASSWORD + process.env.MASTER_SECURITY_TOKEN;
 const LOGIN_URL = "https://login.salesforce.com";
 
-// Function to authenticate with Master Org
+// Function to Authenticate with Master Org
 async function authenticateMasterOrg() {
   try {
     const authResponse = await axios.post(
@@ -46,34 +46,29 @@ async function authenticateMasterOrg() {
   }
 }
 
-// Function to authenticate with Target Org (User's Org)
-async function authenticateTargetOrg(username, password) {
+// Function to Validate User's Salesforce Access Token
+async function validateUserToken(instance_url, access_token) {
   try {
-    const authResponse = await axios.post(
-      `${LOGIN_URL}/services/oauth2/token`,
-      null,
+    const response = await axios.get(
+      `${instance_url}/services/oauth2/userinfo`,
       {
-        params: {
-          grant_type: "password",
-          client_id: MASTER_CLIENT_ID,
-          client_secret: MASTER_CLIENT_SECRET,
-          username: username,
-          password: password,
+        headers: {
+          Authorization: `Bearer ${access_token}`,
         },
       }
     );
 
-    return authResponse.data;
+    return response.data;
   } catch (error) {
     console.error(
-      "Target Org Authentication Failed:",
+      "Token Validation Failed:",
       error.response?.data || error.message
     );
-    throw new Error("Target Org Authentication Failed");
+    throw new Error("Invalid or Expired Access Token");
   }
 }
 
-// Function to Create Connected App in Target Org
+// Function to Create Connected App in User's Org
 async function createConnectedApp(instance_url, access_token, username) {
   try {
     const connectedAppData = {
@@ -115,27 +110,29 @@ async function createConnectedApp(instance_url, access_token, username) {
   }
 }
 
-// API Endpoint to Authenticate User & Create Connected App
+// API Endpoint to Validate Access Token & Create Connected App
 app.post("/salesforce/authenticate", async (req, res) => {
-  const { username, password } = req.body;
+  const { access_token, instance_url, username } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ error: "Missing username or password" });
+  if (!access_token || !instance_url || !username) {
+    return res
+      .status(400)
+      .json({ error: "Missing access token, instance URL, or username" });
   }
 
   try {
+    // Validate User's Access Token
+    const userData = await validateUserToken(instance_url, access_token);
+    console.log("User Token Validated:", userData);
+
     // Authenticate using Master Org
     const masterAuthData = await authenticateMasterOrg();
     console.log("Master Org Authenticated");
 
-    // Authenticate Target Org (User's Org)
-    const targetAuthData = await authenticateTargetOrg(username, password);
-    console.log("Target Org Authenticated");
-
     // Create Connected App in Target Org
     const connectedAppId = await createConnectedApp(
-      targetAuthData.instance_url,
-      targetAuthData.access_token,
+      instance_url,
+      access_token,
       username
     );
 
@@ -153,7 +150,7 @@ app.post("/salesforce/authenticate", async (req, res) => {
 app.get("/", (req, res) => {
   res.send(`
         <h1>Catmando AWS Server is Running! 🚀</h1>
-        <p>Server is live and connected gfonnected to Salesforce.</p>
+        <p>Server is live and connected to Salesforce.</p>
     `);
 });
 
