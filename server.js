@@ -112,6 +112,7 @@ async function createConnectedApp(instance_url, access_token, username) {
 
 // API Endpoint to Validate Access Token & Create Connected App
 app.post("/salesforce/authenticate", async (req, res) => {
+  log("i am at server ")
   const { access_token, instance_url, username } = req.body;
 
   if (!access_token || !instance_url || !username) {
