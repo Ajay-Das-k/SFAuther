@@ -153,7 +153,7 @@ app.post("/salesforce/authenticate", async (req, res) => {
 app.get("/", (req, res) => {
   res.send(`
         <h1>Catmando AWS Server is Running! 🚀</h1>
-        <p>Server is live and connected to Salesforce.</p>
+        <p>Server is live and connected gfonnected to Salesforce.</p>
     `);
 });
 
