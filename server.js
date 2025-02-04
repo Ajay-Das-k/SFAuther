@@ -1,9 +1,13 @@
 const express = require("express");
 const axios = require("axios");
+const morgan = require("morgan");
 require("dotenv").config();
 
 const app = express();
 const PORT = 3000; // Change if needed
+
+// Use Morgan for logging HTTP requests
+app.use(morgan("dev"));
 
 // Load Salesforce OAuth credentials from environment variables
 const CLIENT_ID = process.env.CLIENT_ID;
