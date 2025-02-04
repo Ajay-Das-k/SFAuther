@@ -77,7 +77,7 @@ app.get("/", (req, res) => {
     <body>
         <h1>Server is Running!</h1>
         <p>Your Node.js server is active and responding.</p>
-        <img src="https://source.unsplash.com/600x400/?technology,server" alt="Server Image">
+        <img src="https://cdn.pfps.gg/pfps/2285-maxwell-the-cat.gif" alt="Server Image">
     </body>
     </html>
   `);
