@@ -15,14 +15,15 @@ const PARENT_ORG_CLIENT_ID = process.env.PARENT_ORG_CLIENT_ID;
 const PARENT_ORG_CLIENT_SECRET = process.env.PARENT_ORG_CLIENT_SECRET;
 const PARENT_ORG_USERNAME = process.env.PARENT_ORG_USERNAME;
 const PARENT_ORG_PASSWORD = process.env.PARENT_ORG_PASSWORD;
+const PARENT_ORG_SECURITY_TOKEN = process.env.PARENT_ORG_SECURITY_TOKEN;
 const CALLBACK_URL = "https://catmando.xyz/callback";
 
-// Authenticate with Salesforce
-async function loginToSalesforce(username, password) {
+async function loginToSalesforce(username, password, securityToken) {
   const conn = new jsforce.Connection();
-  await conn.login(username, password);
+  await conn.login(username, password + securityToken); // Append Security Token
   return conn;
 }
+
 
 // Create Connected App
 async function createConnectedApp(userConn) {
@@ -49,14 +50,19 @@ app.post("/authenticate", async (req, res) => {
   try {
     // Login to Parent Org
     const parentConn = await loginToSalesforce(
-      PARENT_ORG_USERNAME,
-      PARENT_ORG_PASSWORD
+      process.env.PARENT_ORG_USERNAME,
+      process.env.PARENT_ORG_PASSWORD,
+      process.env.PARENT_ORG_SECURITY_TOKEN // Append Security Token
     );
 
     // Login to User Org
-    const userConn = await loginToSalesforce(username, password);
+    const userConn = await loginToSalesforce(
+      username,
+      password,
+      process.env.PARENT_ORG_SECURITY_TOKEN
+    );
 
-    // Create Connected App
+    // Create Connected App in User Org
     const appInfo = await createConnectedApp(userConn);
 
     res.json({
@@ -64,7 +70,7 @@ app.post("/authenticate", async (req, res) => {
       message: "Connected App created successfully",
       clientId: "generated_client_id",
       clientSecret: "generated_client_secret",
-      callbackUrl: CALLBACK_URL,
+      callbackUrl: "https://catmando.xyz/callback",
     });
   } catch (error) {
     console.error("Error:", error);
