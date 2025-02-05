@@ -1,160 +1,87 @@
+require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
+const bodyParser = require("body-parser");
+const cors = require("cors");
 const jsforce = require("jsforce");
-const morgan = require("morgan");
-require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(require("cors")());
-app.use(morgan("dev")); // Logs all HTTP requests
+app.use(cors());
+app.use(bodyParser.json());
 
-// Master Org Credentials (Stored in AWS)
-const MASTER_CLIENT_ID = process.env.MASTER_CLIENT_ID;
-const MASTER_CLIENT_SECRET = process.env.MASTER_CLIENT_SECRET;
-const MASTER_USERNAME = process.env.MASTER_USERNAME;
-const MASTER_PASSWORD =
-  process.env.MASTER_PASSWORD + process.env.MASTER_SECURITY_TOKEN;
-const LOGIN_URL = "https://login.salesforce.com";
+const PARENT_ORG_CLIENT_ID = process.env.PARENT_ORG_CLIENT_ID;
+const PARENT_ORG_CLIENT_SECRET = process.env.PARENT_ORG_CLIENT_SECRET;
+const PARENT_ORG_USERNAME = process.env.PARENT_ORG_USERNAME;
+const PARENT_ORG_PASSWORD = process.env.PARENT_ORG_PASSWORD;
+const CALLBACK_URL = "https://catmando.xyz/callback";
 
-// Function to Authenticate with Master Org
-async function authenticateMasterOrg() {
-  try {
-    const authResponse = await axios.post(
-      `${LOGIN_URL}/services/oauth2/token`,
-      null,
-      {
-        params: {
-          grant_type: "password",
-          client_id: MASTER_CLIENT_ID,
-          client_secret: MASTER_CLIENT_SECRET,
-          username: MASTER_USERNAME,
-          password: MASTER_PASSWORD,
-        },
-      }
-    );
-
-    return authResponse.data;
-  } catch (error) {
-    console.error(
-      "Master Org Authentication Failed:",
-      error.response?.data || error.message
-    );
-    throw new Error("Master Org Authentication Failed");
-  }
+// Authenticate with Salesforce
+async function loginToSalesforce(username, password) {
+  const conn = new jsforce.Connection();
+  await conn.login(username, password);
+  return conn;
 }
 
-// Function to Validate User's Salesforce Access Token
-async function validateUserToken(instance_url, access_token) {
-  try {
-    const response = await axios.get(
-      `${instance_url}/services/oauth2/userinfo`,
-      {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-        },
-      }
-    );
+// Create Connected App
+async function createConnectedApp(userConn) {
+  const appName = `DataLoaderApp_${Date.now()}`;
 
-    return response.data;
-  } catch (error) {
-    console.error(
-      "Token Validation Failed:",
-      error.response?.data || error.message
-    );
-    throw new Error("Invalid or Expired Access Token");
-  }
+  const appDetails = {
+    Name: appName,
+    ContactEmail: "admin@yourcompany.com",
+    Description: "Connected App for Data Loader",
+    ConsumerKey: "generated_key",
+    ConsumerSecret: "generated_secret",
+    CallbackUrl: CALLBACK_URL,
+    Scopes: ["refresh_token", "api"],
+  };
+
+  const result = await userConn.sobject("ConnectedApp").create(appDetails);
+  return { appName, result };
 }
 
-// Function to Create Connected App in User's Org
-async function createConnectedApp(instance_url, access_token, username) {
-  try {
-    const connectedAppData = {
-      Name: "GeneratedConnectedApp",
-      ContactEmail: "admin@example.com",
-      Description: "Automatically created Connected App",
-      CallbackUrl: "https://catmando.xyz/oauth/callback",
-      ConsumerKey: "Auto-Generated",
-      ConsumerSecret: "Auto-Generated",
-      AuthProviderType: "OAuth",
-      AllowedOAuthScopes: [
-        "openid",
-        "profile",
-        "email",
-        "api",
-        "refresh_token",
-      ],
-      RunAsUser: username,
-    };
-
-    const appCreationResponse = await axios.post(
-      `${instance_url}/services/data/v57.0/sobjects/ConnectedApplication`,
-      connectedAppData,
-      {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    return appCreationResponse.data.id;
-  } catch (error) {
-    console.error(
-      "Failed to Create Connected App:",
-      error.response?.data || error.message
-    );
-    throw new Error("Failed to Create Connected App");
-  }
-}
-
-// API Endpoint to Validate Access Token & Create Connected App
-app.post("/salesforce/authenticate", async (req, res) => {
-  log("i am at server ")
-  const { access_token, instance_url, username } = req.body;
-
-  if (!access_token || !instance_url || !username) {
-    return res
-      .status(400)
-      .json({ error: "Missing access token, instance URL, or username" });
-  }
+// API to authenticate user and create Connected App
+app.post("/authenticate", async (req, res) => {
+  const { username, password } = req.body;
 
   try {
-    // Validate User's Access Token
-    const userData = await validateUserToken(instance_url, access_token);
-    console.log("User Token Validated:", userData);
-
-    // Authenticate using Master Org
-    const masterAuthData = await authenticateMasterOrg();
-    console.log("Master Org Authenticated");
-
-    // Create Connected App in Target Org
-    const connectedAppId = await createConnectedApp(
-      instance_url,
-      access_token,
-      username
+    // Login to Parent Org
+    const parentConn = await loginToSalesforce(
+      PARENT_ORG_USERNAME,
+      PARENT_ORG_PASSWORD
     );
+
+    // Login to User Org
+    const userConn = await loginToSalesforce(username, password);
+
+    // Create Connected App
+    const appInfo = await createConnectedApp(userConn);
 
     res.json({
-      message: "Connected App Created Successfully",
-      connectedAppId: connectedAppId,
+      success: true,
+      message: "Connected App created successfully",
+      clientId: "generated_client_id",
+      clientSecret: "generated_client_secret",
+      callbackUrl: CALLBACK_URL,
     });
   } catch (error) {
-    console.error("Error:", error.message);
-    res.status(500).json({ error: error.message });
+    console.error("Error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Root Health Check Endpoint
-app.get("/", (req, res) => {
-  res.send(`
-        <h1>Catmando AWS Server is Running! 🚀</h1>
-        <p>Server is live and connected to Salesforce.</p>
-    `);
+// Health Check Endpoint
+app.get("/status", (req, res) => {
+  res.send({ status: "Server is running" });
+});
+
+// OAuth Callback (For Future Use)
+app.get("/callback", (req, res) => {
+  res.send("OAuth Callback URL Hit");
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on https://catmando.xyz`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
