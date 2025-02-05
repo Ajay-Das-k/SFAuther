@@ -4,7 +4,6 @@ const axios = require("axios");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const jsforce = require("jsforce");
-const crypto = require("crypto");
 const morgan = require("morgan");
 const path = require("path");
 const fs = require("fs");
@@ -12,32 +11,23 @@ const fs = require("fs");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Create logs directory if it doesn't exist
+// Logging setup
 const logsDir = path.join(__dirname, "logs");
 if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir);
 }
 
-// Create a write stream for Morgan logs
 const accessLogStream = fs.createWriteStream(path.join(logsDir, "access.log"), {
   flags: "a",
 });
 
-// Morgan logging configuration
-if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"));
-}
-app.use(morgan("combined", { stream: accessLogStream }));
-
 // Middleware
+app.use(morgan("combined", { stream: accessLogStream }));
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "public")));
 
-// Environment variables validation
+// Environment validation
 const requiredEnvVars = [
-  "PARENT_ORG_CLIENT_ID",
-  "PARENT_ORG_CLIENT_SECRET",
   "PARENT_ORG_USERNAME",
   "PARENT_ORG_PASSWORD",
   "PARENT_ORG_SECURITY_TOKEN",
@@ -49,230 +39,148 @@ requiredEnvVars.forEach((varName) => {
   }
 });
 
-const CALLBACK_URL = "https://catmando.xyz/oauth/callback";
+// Constants
+const CALLBACK_URL = "https://catmando.xyz/callback";
 
-// Utility function to generate secure random strings
-function generateSecureString(length = 32) {
-  return crypto.randomBytes(length).toString("hex");
+// Utility function to generate unique Connected App name
+function generateAppName() {
+  return `DataLoader_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 }
 
-// Salesforce login function with proper error handling
-async function loginToSalesforce(username, password, securityToken) {
+// Step 3: Authenticate with Parent Org
+async function authenticateWithParentOrg() {
   try {
-    const conn = new jsforce.Connection({
-      // loginUrl: 'https://test.salesforce.com' // for sandbox
-    });
-
-    await conn.login(username, password + securityToken);
+    const conn = new jsforce.Connection();
+    await conn.login(
+      process.env.PARENT_ORG_USERNAME,
+      process.env.PARENT_ORG_PASSWORD + process.env.PARENT_ORG_SECURITY_TOKEN
+    );
     return conn;
   } catch (error) {
-    console.error("Salesforce login error:", error);
-    throw new Error(`Failed to login to Salesforce: ${error.message}`);
+    console.error("Parent Org authentication error:", error);
+    throw new Error("Failed to authenticate with Parent Org");
   }
 }
 
-// Create Connected App with proper error handling and validation
-async function createConnectedApp(userConn, userEmail) {
+// Step 4: Create Connected App in User's Org
+async function createConnectedAppInUserOrg(userConn) {
   try {
-    const timestamp = Date.now();
-    const appName = `DataLoader_${timestamp}`;
-    const consumerKey = generateSecureString(32);
-    const consumerSecret = generateSecureString(64);
+    const appName = generateAppName();
 
-    const appDetails = {
-      FullName: appName,
-      Name: appName,
-      ContactEmail: userEmail,
-      Description: "Automated Connected App for Data Loader Integration",
-      ConsumerKey: consumerKey,
-      ConsumerSecret: consumerSecret,
-      CallbackUrl: CALLBACK_URL,
-      Scopes: ["api", "refresh_token", "offline_access"],
-      IsAdminApproved: true,
-      StartURL: CALLBACK_URL,
+    const connectedApp = {
+      fullName: appName,
+      label: appName,
+      contactEmail: process.env.ADMIN_EMAIL || "admin@example.com",
+      description: "Data Loader Connected App",
+      oauthConfig: {
+        callbackUrl: CALLBACK_URL,
+        consumerKey: `${appName}_KEY`,
+        consumerSecret: `${appName}_SECRET`,
+        scopes: ["api", "refresh_token"],
+        isAdminApproved: true,
+      },
     };
 
-    const result = await userConn.tooling
-      .sobject("ConnectedApplication")
-      .create(appDetails);
+    const result = await userConn.metadata.create("ConnectedApp", connectedApp);
 
     if (!result.success) {
       throw new Error("Failed to create Connected App");
     }
 
     return {
-      appName,
-      consumerKey,
-      consumerSecret,
+      clientId: `${appName}_KEY`,
+      clientSecret: `${appName}_SECRET`,
       callbackUrl: CALLBACK_URL,
-      id: result.id,
     };
   } catch (error) {
-    console.error("Create Connected App error:", error);
-    throw new Error(`Failed to create Connected App: ${error.message}`);
+    console.error("Connected App creation error:", error);
+    throw new Error("Failed to create Connected App in user org");
   }
 }
 
-// Main application route
-app.get("/", (req, res) => {
-  res.json({
-    name: "Salesforce Data Loader API",
-    version: process.env.npm_package_version || "1.0.0",
-    environment: process.env.NODE_ENV || "development",
-    endpoints: {
-      authenticate: "/authenticate",
-      callback: "/oauth/callback",
-      health: "/health",
-    },
-    documentation: "/docs",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Documentation route
-app.get("/docs", (req, res) => {
-  res.json({
-    apiDocumentation: {
-      authenticate: {
-        method: "POST",
-        path: "/authenticate",
-        description: "Authenticate user and create Connected App",
-        requiredFields: ["username", "password", "email"],
-      },
-      callback: {
-        method: "GET",
-        path: "/oauth/callback",
-        description: "OAuth callback handler",
-        queryParams: ["code", "state"],
-      },
-      health: {
-        method: "GET",
-        path: "/health",
-        description: "Health check endpoint",
-      },
-    },
-  });
-});
-
-// Authentication endpoint
+// Main authentication endpoint
 app.post("/authenticate", async (req, res) => {
-  const { username, password, email } = req.body;
+  const { username, password } = req.body;
 
-  if (!username || !password || !email) {
+  if (!username || !password) {
     return res.status(400).json({
       success: false,
-      error:
-        "Missing required fields: username, password, and email are required",
+      error: "Username and password are required",
     });
   }
 
   try {
-    // Login to Parent Org
-    const parentConn = await loginToSalesforce(
-      process.env.PARENT_ORG_USERNAME,
-      process.env.PARENT_ORG_PASSWORD,
-      process.env.PARENT_ORG_SECURITY_TOKEN
-    );
+    // Step 3: Authenticate with Parent Org
+    await authenticateWithParentOrg();
 
-    // Login to User Org
-    const userConn = await loginToSalesforce(
+    // Step 4: Login to User's Org and Create Connected App
+    const userConn = new jsforce.Connection();
+    await userConn.login(
       username,
-      password,
-      process.env.PARENT_ORG_SECURITY_TOKEN
+      password + process.env.PARENT_ORG_SECURITY_TOKEN
     );
 
-    // Create Connected App
-    const appInfo = await createConnectedApp(userConn, email);
+    const appCredentials = await createConnectedAppInUserOrg(userConn);
 
+    // Step 5: Return OAuth credentials
     res.json({
       success: true,
       message: "Connected App created successfully",
-      data: {
-        clientId: appInfo.consumerKey,
-        clientSecret: appInfo.consumerSecret,
-        callbackUrl: appInfo.callbackUrl,
-        appName: appInfo.appName,
-      },
+      clientId: appCredentials.clientId,
+      clientSecret: appCredentials.clientSecret,
+      callbackUrl: appCredentials.callbackUrl,
     });
   } catch (error) {
-    console.error("Authentication error:", error);
+    console.error("Authentication flow error:", error);
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || "Authentication failed",
     });
   }
 });
 
-// OAuth callback handler
-app.get("/oauth/callback", async (req, res) => {
-  const { code, state } = req.query;
+// OAuth callback endpoint
+app.get("/callback", (req, res) => {
+  const { code } = req.query;
 
-  if (!code) {
-    return res.status(400).json({
-      success: false,
-      error: "Authorization code is missing",
-    });
-  }
+  // Log OAuth callback
+  fs.appendFileSync(
+    path.join(logsDir, "oauth.log"),
+    `${new Date().toISOString()} - OAuth callback received\n`
+  );
 
-  try {
-    // Log the callback
-    fs.appendFileSync(
-      path.join(logsDir, "oauth.log"),
-      `${new Date().toISOString()} - Callback received with code: ${code}\n`
-    );
-
-    res.json({
-      success: true,
-      message: "Authorization successful",
-    });
-  } catch (error) {
-    console.error("OAuth callback error:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-// Health check endpoint
-app.get("/health", (req, res) => {
   res.json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || "1.0.0",
-    environment: process.env.NODE_ENV || "development",
+    success: true,
+    message: "OAuth callback received",
   });
 });
 
-// Custom error logging middleware
+// Server status endpoint
+app.get("/status", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Error handling middleware
 app.use((err, req, res, next) => {
-  // Log error to file
+  console.error(err.stack);
   fs.appendFileSync(
     path.join(logsDir, "error.log"),
     `${new Date().toISOString()} - ${err.stack}\n`
   );
 
-  console.error(err.stack);
   res.status(500).json({
     success: false,
     error: "Internal server error",
-    message:
-      process.env.NODE_ENV === "development"
-        ? err.message
-        : "An error occurred",
   });
 });
 
-// Start server with proper error handling and logging
+// Start server
 const server = app
   .listen(PORT, () => {
-    console.log(
-      `Server running in ${
-        process.env.NODE_ENV || "development"
-      } mode on http://localhost:${PORT}`
-    );
-
-    // Log startup
+    console.log(`Server running on port ${PORT}`);
     fs.appendFileSync(
       path.join(logsDir, "server.log"),
       `${new Date().toISOString()} - Server started on port ${PORT}\n`
@@ -280,18 +188,13 @@ const server = app
   })
   .on("error", (err) => {
     console.error("Server failed to start:", err);
-    fs.appendFileSync(
-      path.join(logsDir, "error.log"),
-      `${new Date().toISOString()} - Server failed to start: ${err.stack}\n`
-    );
     process.exit(1);
   });
 
-// Graceful shutdown handling
+// Graceful shutdown
 process.on("SIGTERM", () => {
-  console.info("SIGTERM signal received.");
   server.close(() => {
-    console.log("Server closed.");
+    console.log("Server shutdown completed");
     process.exit(0);
   });
 });
