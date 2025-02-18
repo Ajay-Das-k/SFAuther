@@ -2,11 +2,13 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const bodyParser = require("body-parser");
+const morgan = require("morgan");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
+app.use(morgan("dev"));
 
 // Salesforce Credentials
 const SALESFORCE_CREDENTIALS = {
