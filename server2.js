@@ -7,8 +7,17 @@ const morgan = require("morgan");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
+app.use(bodyParser.json()); // Ensure JSON parsing is enabled
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan("dev"));
+
+// Debugging middleware to check incoming requests
+app.use((req, res, next) => {
+  console.log(`Received Request: ${req.method} ${req.url}`);
+  console.log("Headers:", req.headers);
+  console.log("Body:", req.body);
+  next();
+});
 
 // Salesforce Credentials
 const SALESFORCE_CREDENTIALS = {
@@ -70,8 +79,7 @@ app.get("/", (req, res) => {
 
 // Route to execute a SOQL query
 app.post("/query", async (req, res) => {
-  console.log("Received /query request:", req.body); // Debugging log
-
+  console.log("Received POST /query request with body:", req.body);
   const { query } = req.body;
   if (!query) {
     return res.status(400).json({ error: "Query is required" });
@@ -85,7 +93,6 @@ app.post("/query", async (req, res) => {
         params: { q: query },
       }
     );
-    console.log("Salesforce response:", response.data); // Debugging log
     res.json(response.data);
   } catch (error) {
     console.error(
@@ -97,7 +104,6 @@ app.post("/query", async (req, res) => {
       .json({ error: error.response ? error.response.data : error.message });
   }
 });
-
 
 // Route to get all Salesforce objects
 app.get("/objects", async (req, res) => {
