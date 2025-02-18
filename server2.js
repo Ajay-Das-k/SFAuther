@@ -70,6 +70,8 @@ app.get("/", (req, res) => {
 
 // Route to execute a SOQL query
 app.post("/query", async (req, res) => {
+  console.log("Received /query request:", req.body); // Debugging log
+
   const { query } = req.body;
   if (!query) {
     return res.status(400).json({ error: "Query is required" });
@@ -83,13 +85,19 @@ app.post("/query", async (req, res) => {
         params: { q: query },
       }
     );
+    console.log("Salesforce response:", response.data); // Debugging log
     res.json(response.data);
   } catch (error) {
+    console.error(
+      "Error fetching data:",
+      error.response ? error.response.data : error.message
+    );
     res
       .status(500)
       .json({ error: error.response ? error.response.data : error.message });
   }
 });
+
 
 // Route to get all Salesforce objects
 app.get("/objects", async (req, res) => {
